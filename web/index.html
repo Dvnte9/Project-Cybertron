@@ -56,14 +56,15 @@
         <section class="workspace-card" aria-labelledby="folder-title">
           <div class="section-title-row">
             <div><div class="section-kicker">MONITORED LOCATION</div><h2 id="folder-title">Your scan folder</h2></div>
-            <span class="scope-badge"><span class="scope-dot"></span> FIXED SCOPE</span>
+            <span class="scope-badge"><span class="scope-dot"></span> ALLOWED ROOTS ONLY</span>
           </div>
           <div class="folder-row">
             <div class="folder-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H10l2 2h7.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3.5 10h17" stroke="currentColor" stroke-width="1.7"/></svg></div>
-            <div class="folder-details"><span class="folder-label">SERVER-CONFIGURED DIRECTORY</span><code id="directory-path">Loading…</code></div>
+            <div class="folder-details"><span class="folder-label">CURRENT SCAN DIRECTORY</span><code id="directory-path">Loading…</code></div>
+            <button id="choose-folder-button" class="button button-quiet folder-change" type="button">Change folder</button>
             <div id="baseline-state" class="baseline-state"><span class="state-indicator"></span><span>Checking baseline…</span></div>
           </div>
-          <p class="scope-note"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.4"/><path d="M10 9v4M10 6.4v.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg> The server scans only this configured folder. The browser cannot choose another path.</p>
+          <p class="scope-note"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.3" stroke="currentColor" stroke-width="1.4"/><path d="M10 9v4M10 6.4v.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg> Browse only inside folders explicitly allowed when the server starts. Symbolic links are not followed.</p>
         </section>
 
         <section class="action-grid" aria-label="Integrity actions">
@@ -102,6 +103,20 @@
       </div>
     </main>
   </div>
+  <dialog id="folder-dialog" class="folder-dialog" aria-labelledby="folder-dialog-title">
+    <div class="folder-dialog-inner">
+      <div class="dialog-icon folder-dialog-icon">↗</div>
+      <h2 id="folder-dialog-title">Choose a scan folder</h2>
+      <p class="folder-dialog-intro">Browse folders that were explicitly allowed when the server started. Only folders inside an allowed root can be selected.</p>
+      <label class="root-select-label" for="allowed-root-select">Allowed location</label>
+      <select id="allowed-root-select" class="root-select"></select>
+      <div class="folder-browser-path"><button id="folder-up-button" class="folder-up-button" type="button" aria-label="Go to parent folder" title="Go to parent folder">↑</button><code id="folder-current-path"></code></div>
+      <div id="folder-list" class="folder-list" role="list" aria-label="Subfolders"></div>
+      <p id="folder-list-empty" class="folder-list-empty" hidden>No subfolders here. You can select this folder.</p>
+      <p id="folder-dialog-error" class="folder-dialog-error" role="alert" hidden></p>
+      <div class="dialog-actions folder-dialog-actions"><button id="folder-cancel-button" class="button button-quiet" type="button">Cancel</button><button id="folder-use-button" class="button button-primary" type="button">Use this folder</button></div>
+    </div>
+  </dialog>
   <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title">
     <form method="dialog" class="dialog-inner">
       <div class="dialog-icon">!</div><h2 id="confirm-title">Replace the current baseline?</h2>

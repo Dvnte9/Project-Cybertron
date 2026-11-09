@@ -77,6 +77,7 @@ h1 span { color: #a993f4; }
 .baseline-state.is-ready { color: #68d9b7; }
 .baseline-state.is-ready .state-indicator { background: currentColor; box-shadow: 0 0 8px #68d9b777; }
 .baseline-state.is-empty { color: #e9bd71; }
+.folder-change { flex: 0 0 auto; margin-left: 4px; color: #d0c5f5; border: 1px solid #4a4163; background: #262238; padding: 8px 10px; font-size: 10px; }
 .scope-note { display: flex; align-items: center; gap: 7px; margin: 12px 0 0; color: #778194; font-size: 10px; }
 .scope-note svg { width: 14px; height: 14px; color: #9a8ac9; flex: 0 0 auto; }
 .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 16px 0; }
@@ -147,7 +148,26 @@ td code { font: 11px 'DM Mono', monospace; overflow-wrap: anywhere; color: #bdc5
 .page-footer { display: flex; justify-content: space-between; gap: 10px; padding: 19px 2px 0; color: #596376; font: 9px 'DM Mono', monospace; letter-spacing: .07em; }
 .footer-divider { color: #8b78c2; padding: 0 4px; }
 .confirm-dialog { width: min(420px, calc(100vw - 28px)); padding: 0; color: var(--text); border: 1px solid #3b4253; border-radius: 13px; background: #1a202d; box-shadow: 0 24px 80px #0009; }
-.confirm-dialog::backdrop { background: #070911b8; backdrop-filter: blur(4px); }
+.confirm-dialog::backdrop, .folder-dialog::backdrop { background: #070911b8; backdrop-filter: blur(4px); }
+.folder-dialog { width: min(560px, calc(100vw - 28px)); max-height: min(640px, calc(100vh - 28px)); padding: 0; overflow: auto; color: var(--text); border: 1px solid #3b4253; border-radius: 13px; background: #1a202d; box-shadow: 0 24px 80px #0009; }
+.folder-dialog-inner { padding: 24px; }
+.folder-dialog-icon { color: #c1aaff; background: #29243b; border-color: #514272; font-size: 18px; }
+.folder-dialog-inner h2 { font: 600 17px Manrope, sans-serif; margin: 14px 0 7px; }
+.folder-dialog-intro { color: #9da6b8; font-size: 11px; line-height: 1.55; margin: 0 0 17px; }
+.root-select-label { display: block; margin-bottom: 6px; color: #8993a7; font: 500 9px 'DM Mono', monospace; letter-spacing: .1em; text-transform: uppercase; }
+.root-select { width: 100%; padding: 9px 10px; border: 1px solid #343b4c; border-radius: 6px; color: #dce0e9; background: #121722; font: 11px 'DM Mono', monospace; }
+.folder-browser-path { display: flex; align-items: center; gap: 9px; margin-top: 14px; padding: 8px 9px; border: 1px solid #303747; border-radius: 7px; background: #131824; }
+.folder-up-button { width: 27px; height: 27px; border: 1px solid #3b4354; border-radius: 5px; color: #c8bbef; background: #252238; cursor: pointer; }
+.folder-up-button:disabled { opacity: .35; cursor: not-allowed; }
+.folder-browser-path code { color: #c9cfdb; font: 10px 'DM Mono', monospace; overflow-wrap: anywhere; }
+.folder-list { max-height: 250px; overflow-y: auto; margin-top: 8px; border: 1px solid #2d3443; border-radius: 7px; background: #141a25; }
+.folder-entry { display: flex; width: 100%; align-items: center; gap: 9px; padding: 10px 11px; border: 0; border-bottom: 1px solid #252c39; color: #c7cddb; background: transparent; text-align: left; font-size: 11px; cursor: pointer; }
+.folder-entry:last-child { border-bottom: 0; }
+.folder-entry::before { content: '▰'; color: #a88cf5; font-size: 12px; }
+.folder-entry:hover, .folder-entry:focus-visible { color: #fff; background: #28233a; outline: none; }
+.folder-list-empty { padding: 15px 10px; margin: 8px 0 0; border: 1px dashed #394153; border-radius: 7px; color: #8993a7; font-size: 10px; text-align: center; }
+.folder-dialog-error { padding: 9px 10px; margin: 10px 0 0; border: 1px solid #5d3038; border-radius: 6px; color: #ffabb3; background: #2b1d25; font-size: 10px; }
+.folder-dialog-actions { margin-top: 17px; }
 .dialog-inner { padding: 24px; }
 .dialog-icon { width: 31px; height: 31px; border-radius: 9px; display: grid; place-items: center; color: #f0c86f; background: #342e20; border: 1px solid #5a4a2b; font-weight: 700; }
 .dialog-inner h2 { font: 600 17px Manrope, sans-serif; margin: 14px 0 8px; }
@@ -182,6 +202,7 @@ td code { font: 11px 'DM Mono', monospace; overflow-wrap: anywhere; color: #bdc5
   .action-card { min-height: 249px; }
   .folder-row { flex-wrap: wrap; }
   .folder-details { flex: 1 1 calc(100% - 60px); }
+  .folder-change { margin-left: 50px; }
   .baseline-state { margin-left: 50px; }
   .workspace-card { padding: 17px 15px 13px; }
   .results-card { padding: 17px 14px 14px; }
