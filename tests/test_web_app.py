@@ -6,6 +6,7 @@ import threading
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from web_app import DashboardServer
@@ -17,7 +18,8 @@ class DashboardApiTests(unittest.TestCase):
         self.root = Path(self.temp.name) / "monitored"
         self.root.mkdir()
         (self.root / "note.txt").write_text("before\n", encoding="utf-8")
-        self.server = DashboardServer(("127.0.0.1", 0), self.root.resolve())
+        self.allowed_root = Path(self.temp.name).resolve()
+        self.server = DashboardServer(("127.0.0.1", 0), self.root.resolve(), [self.allowed_root])
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base_url = f"http://127.0.0.1:{self.server.server_port}"
@@ -58,6 +60,29 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(data["directory"], str(self.root.resolve()))
         self.assertFalse(data["baseline_exists"])
+
+    def test_can_browse_and_select_a_folder_inside_allowed_root(self):
+        other = self.allowed_root / "another-project"
+        other.mkdir()
+        (other / "data.txt").write_text("another folder\\n", encoding="utf-8")
+
+        status, listing = self.request(f"/api/directories?{urlencode({'path': str(self.allowed_root)})}")
+        self.assertEqual(status, 200)
+        self.assertEqual(listing["allowed_root"], str(self.allowed_root))
+        self.assertEqual({item["name"] for item in listing["folders"]}, {"monitored", "another-project"})
+
+        status, selected = self.post("/api/select-directory", {"directory": str(other)})
+        self.assertEqual(status, 200)
+        self.assertEqual(selected["directory"], str(other.resolve()))
+        status, current = self.request("/api/status")
+        self.assertEqual(status, 200)
+        self.assertEqual(current["directory"], str(other.resolve()))
+
+    def test_rejects_folder_outside_allowed_roots(self):
+        outside = Path(self.temp.name).parent
+        status, result = self.post("/api/select-directory", {"directory": str(outside)})
+        self.assertEqual(status, 403)
+        self.assertIn("outside", result["error"])
 
     def test_init_then_check_reports_text_diff_when_opted_in(self):
         status, created = self.post("/api/init", payload={"include_text_snapshots": True})

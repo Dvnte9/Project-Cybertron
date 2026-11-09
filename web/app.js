@@ -11,6 +11,18 @@ const resultRows = document.querySelector("#result-rows");
 const cleanMessage = document.querySelector("#clean-message");
 const confirmDialog = document.querySelector("#confirm-dialog");
 const confirmInit = document.querySelector("#confirm-init");
+const chooseFolderButton = document.querySelector("#choose-folder-button");
+const folderDialog = document.querySelector("#folder-dialog");
+const folderRootSelect = document.querySelector("#allowed-root-select");
+const folderCurrentPath = document.querySelector("#folder-current-path");
+const folderUpButton = document.querySelector("#folder-up-button");
+const folderList = document.querySelector("#folder-list");
+const folderListEmpty = document.querySelector("#folder-list-empty");
+const folderDialogError = document.querySelector("#folder-dialog-error");
+const folderUseButton = document.querySelector("#folder-use-button");
+const folderCancelButton = document.querySelector("#folder-cancel-button");
+let folderPickerPath = null;
+let folderPickerParent = null;
 
 const labels = {
   added: { label: "NEW", className: "new" },
@@ -84,11 +96,69 @@ async function loadStatus() {
     directoryPath.textContent = status.directory;
     directoryPath.title = status.directory;
     setBaselineState(status.baseline_exists, status.baseline_file_count, status.text_snapshot_count, status.baseline_error);
+    return status;
   } catch (error) {
     directoryPath.textContent = "Dashboard unavailable";
     setBaselineState(false, 0, 0, error.message);
     showNotice(error.message, "error");
+    return null;
   }
+}
+
+async function loadFolders(path = null) {
+  folderDialogError.hidden = true;
+  folderDialogError.textContent = "";
+  folderList.replaceChildren();
+  folderListEmpty.hidden = true;
+  folderCurrentPath.textContent = "Loading allowed folders…";
+  folderUpButton.disabled = true;
+
+  const url = path
+    ? `/api/directories?${new URLSearchParams({ path })}`
+    : "/api/directories";
+  const data = await requestJson(url);
+  folderPickerPath = data.current;
+  folderPickerParent = data.parent;
+  folderCurrentPath.textContent = data.current;
+  folderCurrentPath.title = data.current;
+  folderUpButton.disabled = !data.parent;
+
+  const existingRoots = new Set(Array.from(folderRootSelect.options, (option) => option.value));
+  for (const root of data.allowed_roots) {
+    if (!existingRoots.has(root)) {
+      const option = document.createElement("option");
+      option.value = root;
+      option.textContent = root;
+      folderRootSelect.append(option);
+    }
+  }
+  folderRootSelect.value = data.allowed_root;
+
+  for (const folder of data.folders) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "folder-entry";
+    button.textContent = folder.name;
+    button.title = folder.path;
+    button.addEventListener("click", () => loadFolders(folder.path).catch(showFolderError));
+    folderList.append(button);
+  }
+  folderListEmpty.hidden = data.folders.length > 0;
+}
+
+function showFolderError(error) {
+  folderDialogError.textContent = error.message || String(error);
+  folderDialogError.hidden = false;
+  folderCurrentPath.textContent = folderPickerPath || "Choose an allowed location";
+}
+
+function resetForNewDirectory() {
+  emptyState.hidden = false;
+  resultsContent.hidden = true;
+  cleanMessage.hidden = true;
+  resultRows.replaceChildren();
+  summaryCards.replaceChildren();
+  resultSummary.textContent = "Run a check to see results";
 }
 
 function resetResults() {
@@ -214,6 +284,44 @@ async function checkFiles() {
     setBusy(false);
   }
 }
+
+chooseFolderButton.addEventListener("click", () => {
+  folderDialog.showModal();
+  loadFolders().catch(showFolderError);
+});
+folderRootSelect.addEventListener("change", () => {
+  if (folderRootSelect.value) loadFolders(folderRootSelect.value).catch(showFolderError);
+});
+folderUpButton.addEventListener("click", () => {
+  if (folderPickerParent) loadFolders(folderPickerParent).catch(showFolderError);
+});
+folderCancelButton.addEventListener("click", () => folderDialog.close());
+folderUseButton.addEventListener("click", async () => {
+  if (!folderPickerPath) return;
+  folderUseButton.disabled = true;
+  clearNotice();
+  try {
+    await requestJson("/api/select-directory", {
+      method: "POST",
+      payload: { directory: folderPickerPath },
+    });
+    folderDialog.close();
+    resetForNewDirectory();
+    const status = await loadStatus();
+    if (status) {
+      showNotice(
+        status.baseline_exists
+          ? "Folder changed. This folder has an existing baseline."
+          : "Folder changed. Create a baseline for this folder before checking it.",
+        "success",
+      );
+    }
+  } catch (error) {
+    showFolderError(error);
+  } finally {
+    folderUseButton.disabled = false;
+  }
+});
 
 initButton.addEventListener("click", () => confirmDialog.showModal());
 confirmInit.addEventListener("click", (event) => {
