@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
 import json
 import os
@@ -17,6 +18,8 @@ from typing import Any
 SCHEMA_VERSION = 1
 DEFAULT_BASELINE = ".integrity-baseline.json"
 CHUNK_SIZE = 1024 * 1024
+MAX_TEXT_SNAPSHOT_BYTES = 64 * 1024
+MAX_TOTAL_TEXT_SNAPSHOT_BYTES = 2 * 1024 * 1024
 HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -29,8 +32,8 @@ def _absolute_path(path: Path) -> Path:
     return Path(os.path.abspath(os.fspath(path)))
 
 
-def _hash_file(path: Path) -> tuple[str, int]:
-    """Hash a regular file, avoiding symlinks where the platform supports it."""
+def _hash_file(path: Path, capture_text: bool = False) -> tuple[str, int, str | None, str | None]:
+    """Hash a regular file; optionally capture a small UTF-8 text snapshot."""
     flags = os.O_RDONLY
     if hasattr(os, "O_BINARY"):
         flags |= os.O_BINARY  # Windows
@@ -44,27 +47,50 @@ def _hash_file(path: Path) -> tuple[str, int]:
             raise IntegrityError("not a regular file (it may have changed during scanning)")
 
         digest = hashlib.sha256()
+        snapshot_bytes = bytearray() if capture_text else None
+        snapshot_status: str | None = None
         while True:
             chunk = os.read(fd, CHUNK_SIZE)
             if not chunk:
                 break
             digest.update(chunk)
+            if snapshot_bytes is not None and snapshot_status is None:
+                if b"\x00" in chunk:
+                    snapshot_status = "binary_or_non_utf8"
+                    snapshot_bytes = None
+                elif len(snapshot_bytes) + len(chunk) > MAX_TEXT_SNAPSHOT_BYTES:
+                    snapshot_status = "too_large"
+                    snapshot_bytes = None
+                else:
+                    snapshot_bytes.extend(chunk)
 
         after = os.fstat(fd)
         if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
             raise IntegrityError("file changed while it was being read")
-        return digest.hexdigest(), after.st_size
+
+        snapshot: str | None = None
+        if snapshot_bytes is not None:
+            try:
+                snapshot = snapshot_bytes.decode("utf-8")
+                snapshot_status = "text"
+            except UnicodeDecodeError:
+                snapshot_status = "binary_or_non_utf8"
+        return digest.hexdigest(), after.st_size, snapshot, snapshot_status
     finally:
         os.close(fd)
 
 
-def scan_directory(root: Path, baseline: Path) -> tuple[dict[str, dict[str, Any]], list[str]]:
-    """Return hashes of regular files beneath root, never following symlinks."""
+def scan_directory(
+    root: Path, baseline: Path, include_text_snapshots: bool = False
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Hash regular files beneath root; optionally retain bounded UTF-8 text."""
     files: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
     baseline_abs = _absolute_path(baseline)
+    snapshot_budget = MAX_TOTAL_TEXT_SNAPSHOT_BYTES
 
     def walk(directory: Path) -> None:
+        nonlocal snapshot_budget
         try:
             entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
         except OSError as exc:
@@ -84,9 +110,23 @@ def scan_directory(root: Path, baseline: Path) -> tuple[dict[str, dict[str, Any]
                 if _absolute_path(path) == baseline_abs:
                     continue
 
-                digest, size = _hash_file(path)
+                digest, size, snapshot, snapshot_status = _hash_file(
+                    path, capture_text=include_text_snapshots
+                )
                 relative = path.relative_to(root).as_posix()
-                files[relative] = {"sha256": digest, "size": size}
+                record: dict[str, Any] = {"sha256": digest, "size": size}
+                if include_text_snapshots:
+                    if snapshot is not None:
+                        snapshot_size = len(snapshot.encode("utf-8"))
+                        if snapshot_size > snapshot_budget:
+                            record["text_snapshot_status"] = "snapshot_budget_exceeded"
+                        else:
+                            record["text_snapshot"] = snapshot
+                            record["text_snapshot_status"] = "text"
+                            snapshot_budget -= snapshot_size
+                    else:
+                        record["text_snapshot_status"] = snapshot_status
+                files[relative] = record
             except (OSError, IntegrityError) as exc:
                 errors.append(f"{path}: {exc}")
 
@@ -122,6 +162,21 @@ def _read_baseline(path: Path) -> dict[str, Any]:
             or record["size"] < 0
         ):
             raise IntegrityError(f"invalid file record in baseline: {name}")
+        if "text_snapshot" in record:
+            snapshot = record["text_snapshot"]
+            try:
+                snapshot_size = len(snapshot.encode("utf-8")) if isinstance(snapshot, str) else -1
+            except UnicodeEncodeError:
+                snapshot_size = -1
+            if snapshot_size < 0 or snapshot_size > MAX_TEXT_SNAPSHOT_BYTES or record.get("text_snapshot_status") != "text":
+                raise IntegrityError(f"invalid text snapshot in baseline: {name}")
+        if "text_snapshot_status" in record and (
+            not isinstance(record["text_snapshot_status"], str)
+            or record["text_snapshot_status"] not in {
+                "text", "too_large", "binary_or_non_utf8", "snapshot_budget_exceeded"
+            }
+        ):
+            raise IntegrityError(f"invalid text snapshot status in baseline: {name}")
     return data
 
 
@@ -148,6 +203,30 @@ def _write_baseline(path: Path, root: Path, files: dict[str, dict[str, Any]]) ->
         raise IntegrityError(f"cannot write baseline {path}: {exc}") from exc
 
 
+def _text_diff(path: str, before: str, after: str) -> str:
+    """Build a unified diff for bounded text snapshots."""
+    return "".join(
+        difflib.unified_diff(
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            fromfile=f"baseline/{path}",
+            tofile=f"current/{path}",
+            lineterm="\n",
+        )
+    )
+
+
+def _snapshot_diff(path: str, before: dict[str, Any] | None, after: dict[str, Any] | None) -> str | None:
+    """Return a diff when all existing sides have a saved/eligible text snapshot."""
+    if before is not None and not isinstance(before.get("text_snapshot"), str):
+        return None
+    if after is not None and not isinstance(after.get("text_snapshot"), str):
+        return None
+    old_text = before["text_snapshot"] if before is not None else ""
+    new_text = after["text_snapshot"] if after is not None else ""
+    return _text_diff(path, old_text, new_text)
+
+
 def _resolve_inputs(root_arg: str, baseline_arg: str | None) -> tuple[Path, Path]:
     try:
         root = Path(root_arg).expanduser().resolve(strict=True)
@@ -161,9 +240,9 @@ def _resolve_inputs(root_arg: str, baseline_arg: str | None) -> tuple[Path, Path
     return root, baseline
 
 
-def run_init(root_arg: str, baseline_arg: str | None) -> int:
+def run_init(root_arg: str, baseline_arg: str | None, include_text_snapshots: bool = False) -> int:
     root, baseline = _resolve_inputs(root_arg, baseline_arg)
-    files, errors = scan_directory(root, baseline)
+    files, errors = scan_directory(root, baseline, include_text_snapshots=include_text_snapshots)
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
@@ -184,7 +263,7 @@ def run_check(root_arg: str, baseline_arg: str | None) -> int:
             f"baseline was created for {saved['root']}; current directory is {root}"
         )
 
-    current, errors = scan_directory(root, baseline)
+    current, errors = scan_directory(root, baseline, include_text_snapshots=True)
     old_files = saved["files"]
     old_names, new_names = set(old_files), set(current)
     added = sorted(new_names - old_names)
@@ -196,10 +275,21 @@ def run_check(root_arg: str, baseline_arg: str | None) -> int:
 
     for name in added:
         print(f"NEW:     {name}")
+        diff = _snapshot_diff(name, None, current[name])
+        if diff:
+            print(diff, end="" if diff.endswith("\n") else "\n")
     for name in changed:
         print(f"CHANGED: {name}")
+        diff = _snapshot_diff(name, old_files[name], current[name])
+        if diff:
+            print(diff, end="" if diff.endswith("\n") else "\n")
+        else:
+            print("  Content diff unavailable (no eligible baseline text snapshot).")
     for name in removed:
         print(f"MISSING: {name}")
+        diff = _snapshot_diff(name, old_files[name], None)
+        if diff:
+            print(diff, end="" if diff.endswith("\n") else "\n")
     for error in errors:
         print(f"ERROR:   {error}", file=sys.stderr)
 
@@ -227,6 +317,12 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument(
             "--baseline", help=f"baseline JSON path (default: <directory>/{DEFAULT_BASELINE})"
         )
+        if command == "init":
+            subparser.add_argument(
+                "--include-text-snapshots",
+                action="store_true",
+                help=f"store UTF-8 text files up to {MAX_TEXT_SNAPSHOT_BYTES // 1024} KiB in the baseline to enable diffs",
+            )
     return parser
 
 
@@ -234,7 +330,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "init":
-            return run_init(args.directory, args.baseline)
+            return run_init(args.directory, args.baseline, args.include_text_snapshots)
         return run_check(args.directory, args.baseline)
     except (IntegrityError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

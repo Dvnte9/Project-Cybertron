@@ -70,6 +70,7 @@
           <article class="action-card create-card">
             <div class="action-icon purple"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4v16M4 12h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
             <div class="action-copy"><div class="action-label">STEP 01 · TRUSTED SNAPSHOT</div><h2>Create baseline</h2><p>Record the current SHA-256 hashes as your known-good state.</p></div>
+            <label class="snapshot-option" for="snapshot-toggle"><input id="snapshot-toggle" type="checkbox"><span><strong>Save text snapshots for diffs</strong><small>Opt-in: stores UTF-8 text in the plaintext baseline (64 KiB/file, 2 MiB total).</small></span></label>
             <button id="init-button" class="button button-primary" type="button"><span>Create baseline</span><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h11m-4-4 4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
             <div class="card-foot"><span class="tiny-shield">◇</span> Replaces the existing baseline</div>
           </article>
@@ -104,7 +105,7 @@
   <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title">
     <form method="dialog" class="dialog-inner">
       <div class="dialog-icon">!</div><h2 id="confirm-title">Replace the current baseline?</h2>
-      <p>This records the folder’s current state as trusted and replaces the existing baseline. Only do this if the current files are known to be safe.</p>
+      <p>This replaces the baseline. If text snapshots are enabled, eligible file contents will be saved in plaintext in that baseline. Only snapshot files you are comfortable storing, and baseline files you trust.</p>
       <div class="dialog-actions"><button class="button button-quiet" value="cancel">Cancel</button><button id="confirm-init" class="button button-primary" value="confirm">Replace baseline</button></div>
     </form>
   </dialog>

@@ -50,16 +50,28 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(data["directory"], str(self.root.resolve()))
         self.assertFalse(data["baseline_exists"])
 
-    def test_init_then_check_reports_changes(self):
-        status, created = self.post("/api/init")
+    def test_init_then_check_reports_text_diff_when_opted_in(self):
+        status, created = self.post("/api/init", payload={"include_text_snapshots": True})
         self.assertEqual(status, 200)
         self.assertEqual(created["file_count"], 1)
+        self.assertEqual(created["text_snapshot_count"], 1)
 
         (self.root / "note.txt").write_text("after\n", encoding="utf-8")
         status, result = self.post("/api/check")
         self.assertEqual(status, 200)
         self.assertEqual(result["changed"], ["note.txt"])
         self.assertTrue(result["has_differences"])
+        self.assertIn("-before", result["diffs"]["note.txt"])
+        self.assertIn("+after", result["diffs"]["note.txt"])
+
+    def test_baseline_without_snapshots_cannot_show_previous_text(self):
+        status, _ = self.post("/api/init")
+        self.assertEqual(status, 200)
+        (self.root / "note.txt").write_text("after\n", encoding="utf-8")
+        status, result = self.post("/api/check")
+        self.assertEqual(status, 200)
+        self.assertNotIn("note.txt", result["diffs"])
+        self.assertIn("note.txt", result["diff_unavailable"])
 
     def test_rejects_cross_origin_and_arbitrary_path_requests(self):
         status, _ = self.post("/api/init", origin="https://attacker.invalid")
