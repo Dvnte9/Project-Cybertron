@@ -36,6 +36,20 @@ python3 integrity_checker.py check ./sample-data --baseline ./baselines/sample.j
 
 Exit codes: `0` means the scan completed and matched (or initialization succeeded), `1` means differences were found, and `2` means an operational or input error prevented a complete check.
 
+## Web dashboard
+
+A small browser dashboard is included. It calls the same Python integrity-checking logic as the CLI and scans exactly one directory configured when the server starts; the browser cannot submit a different path.
+
+For a local machine, bind it to loopback and open the displayed local URL:
+
+```bash
+python3 web_app.py --directory ~/cybertron-lab --host 127.0.0.1 --port 8000
+```
+
+For an isolated development preview that needs to proxy the app, use `--host 0.0.0.0` and the preview URL provided by your environment. The dashboard stores its baseline in `.integrity-baseline.json` inside the configured directory. Creating a baseline replaces the previous baseline and asks for confirmation.
+
+**Web safety:** this educational dashboard has no user authentication. Only run it in a trusted, private environment; do not expose it to a public network or point it at sensitive directories. The server only accepts same-origin action requests and only scans its startup-configured directory. Use synthetic or non-sensitive files for demos.
+
 ## Run the tests
 
 ```bash
