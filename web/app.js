@@ -30,19 +30,19 @@ function clearNotice() {
 }
 
 async function requestJson(url, options = {}) {
-  const { payload, ...fetchOptions } = options;
+  const { payload: requestPayload, ...fetchOptions } = options;
   const response = await fetch(url, {
     ...fetchOptions,
     headers: { "Content-Type": "application/json", ...(fetchOptions.headers || {}) },
-    body: fetchOptions.method === "POST" ? JSON.stringify(payload || {}) : undefined,
+    body: fetchOptions.method === "POST" ? JSON.stringify(requestPayload || {}) : undefined,
     credentials: "same-origin",
   });
-  const payload = await response.json().catch(() => ({}));
+  const responseData = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const details = Array.isArray(payload.details) ? ` ${payload.details.join("; ")}` : "";
-    throw new Error(`${payload.error || `Request failed (${response.status})`}${details}`);
+    const details = Array.isArray(responseData.details) ? ` ${responseData.details.join("; ")}` : "";
+    throw new Error(`${responseData.error || `Request failed (${response.status})`}${details}`);
   }
-  return payload;
+  return responseData;
 }
 
 function setBusy(busy, activeButton) {
