@@ -1,4 +1,6 @@
 import json
+import shutil
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -43,6 +45,13 @@ class DashboardApiTests(unittest.TestCase):
     def post(self, path, payload=None, origin=None):
         return self.request(path, method="POST", payload={} if payload is None else payload,
                             origin=origin or self.base_url)
+
+    def test_frontend_javascript_has_valid_syntax(self):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node.js is not installed; cannot syntax-check the browser script")
+        script = Path(__file__).resolve().parents[1] / "web" / "app.js"
+        subprocess.run([node, "--check", str(script)], check=True, capture_output=True, text=True)
 
     def test_status_exposes_only_configured_scan_root(self):
         status, data = self.request("/api/status")
