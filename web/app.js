@@ -30,10 +30,11 @@ function clearNotice() {
 }
 
 async function requestJson(url, options = {}) {
+  const { payload, ...fetchOptions } = options;
   const response = await fetch(url, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    body: options.method === "POST" ? "{}" : undefined,
+    ...fetchOptions,
+    headers: { "Content-Type": "application/json", ...(fetchOptions.headers || {}) },
+    body: fetchOptions.method === "POST" ? JSON.stringify(payload || {}) : undefined,
     credentials: "same-origin",
   });
   const payload = await response.json().catch(() => ({}));
@@ -62,14 +63,14 @@ function setBusy(busy, activeButton) {
   }
 }
 
-function setBaselineState(exists, count, error) {
+function setBaselineState(exists, count, snapshotCount, error) {
   baselineState.className = `baseline-state ${exists && !error ? "is-ready" : "is-empty"}`;
   const text = baselineState.querySelector("span:last-child");
   if (error) {
     text.textContent = "Baseline needs attention";
     baselineState.title = error;
   } else if (exists) {
-    text.textContent = `Baseline ready · ${count} file${count === 1 ? "" : "s"}`;
+    text.textContent = `Baseline ready · ${count} file${count === 1 ? "" : "s"} · ${snapshotCount || 0} text snapshot${snapshotCount === 1 ? "" : "s"}`;
     baselineState.title = "A baseline is saved for this directory";
   } else {
     text.textContent = "No baseline yet";
@@ -82,10 +83,10 @@ async function loadStatus() {
     const status = await requestJson("/api/status");
     directoryPath.textContent = status.directory;
     directoryPath.title = status.directory;
-    setBaselineState(status.baseline_exists, status.baseline_file_count, status.baseline_error);
+    setBaselineState(status.baseline_exists, status.baseline_file_count, status.text_snapshot_count, status.baseline_error);
   } catch (error) {
     directoryPath.textContent = "Dashboard unavailable";
-    setBaselineState(false, 0, error.message);
+    setBaselineState(false, 0, 0, error.message);
     showNotice(error.message, "error");
   }
 }
@@ -124,6 +125,31 @@ function addResultRow(kind, filePath) {
   resultRows.append(row);
 }
 
+function addDiffRow(filePath, diff) {
+  const row = document.createElement("tr");
+  row.className = "diff-row";
+  const cell = document.createElement("td");
+  cell.colSpan = 2;
+  if (typeof diff === "string") {
+    const details = document.createElement("details");
+    details.className = "diff-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "View exact text changes";
+    const pre = document.createElement("pre");
+    pre.className = "diff-content";
+    pre.textContent = diff || `No line-level text differences for ${filePath}.`;
+    details.append(summary, pre);
+    cell.append(details);
+  } else {
+    const note = document.createElement("span");
+    note.className = "diff-unavailable";
+    note.textContent = "Text diff unavailable — create the baseline with text snapshots enabled; binary, non-UTF-8, or oversized files are not previewed.";
+    cell.append(note);
+  }
+  row.append(cell);
+  resultRows.append(row);
+}
+
 function renderResults(data) {
   resetResults();
   const groups = ["added", "changed", "missing"];
@@ -136,8 +162,13 @@ function renderResults(data) {
   addSummaryCard("MISSING", data.missing.length, "missing");
   addSummaryCard("UNCHANGED", data.unchanged_count, "unchanged");
 
+  const diffs = data.diffs || {};
   for (const kind of groups) {
-    for (const path of data[kind]) addResultRow(kind, path);
+    for (const path of data[kind]) {
+      addResultRow(kind, path);
+      const diff = Object.hasOwn(diffs, path) ? diffs[path] : undefined;
+      addDiffRow(path, diff);
+    }
   }
   if (!data.has_differences) cleanMessage.hidden = false;
 }
@@ -146,8 +177,15 @@ async function initializeBaseline() {
   clearNotice();
   setBusy(true, initButton);
   try {
-    const result = await requestJson("/api/init", { method: "POST" });
-    showNotice(`Baseline created successfully. ${result.file_count} file${result.file_count === 1 ? "" : "s"} recorded.`, "success");
+    const includeTextSnapshots = document.querySelector("#snapshot-toggle").checked;
+    const result = await requestJson("/api/init", {
+      method: "POST",
+      payload: { include_text_snapshots: includeTextSnapshots },
+    });
+    const snapshotNote = includeTextSnapshots
+      ? ` Text snapshots saved for ${result.text_snapshot_count} eligible file(s) in the baseline.`
+      : " Text snapshots were not saved; future checks will show changed file names only.";
+    showNotice(`Baseline created successfully. ${result.file_count} file${result.file_count === 1 ? "" : "s"} recorded.${snapshotNote}`, "success");
     resultSummary.textContent = "Baseline created";
     emptyState.hidden = false;
     resultsContent.hidden = true;

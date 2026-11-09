@@ -18,6 +18,7 @@ from integrity_checker import (
     DEFAULT_BASELINE,
     IntegrityError,
     _read_baseline,
+    _snapshot_diff,
     _write_baseline,
     scan_directory,
 )
@@ -70,10 +71,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if route == "/api/status":
             baseline_exists = self.server.baseline_path.is_file()
             count: int | None = None
+            snapshot_count: int | None = None
             baseline_error: str | None = None
             if baseline_exists:
                 try:
-                    count = len(_read_baseline(self.server.baseline_path)["files"])
+                    files = _read_baseline(self.server.baseline_path)["files"]
+                    count = len(files)
+                    snapshot_count = sum("text_snapshot" in record for record in files.values())
                 except IntegrityError as exc:
                     baseline_error = str(exc)
             self._json(
@@ -82,6 +86,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "directory": str(self.server.scan_root),
                     "baseline_exists": baseline_exists,
                     "baseline_file_count": count,
+                    "text_snapshot_count": snapshot_count,
                     "baseline_error": baseline_error,
                 },
             )
@@ -103,50 +108,60 @@ class DashboardHandler(BaseHTTPRequestHandler):
             content_type += "; charset=utf-8"
         self._send(HTTPStatus.OK, body, content_type)
 
-    def _validate_post(self) -> bool:
+    def _validate_post(self, route: str) -> dict[str, Any] | None:
         host = self.headers.get("Host", "")
         origin = self.headers.get("Origin", "")
         if not host or not origin or urlsplit(origin).netloc.lower() != host.lower():
             self._error(HTTPStatus.FORBIDDEN, "Only same-origin dashboard requests are allowed")
-            return False
+            return None
 
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             self._error(HTTPStatus.BAD_REQUEST, "Invalid request length")
-            return False
+            return None
         if length < 0 or length > MAX_REQUEST_BYTES:
             self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Request is too large")
-            return False
+            return None
         if self.headers.get_content_type() != "application/json":
             self._error(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "Expected application/json")
-            return False
+            return None
         try:
             payload = json.loads(self.rfile.read(length) or b"{}")
         except (json.JSONDecodeError, UnicodeDecodeError):
             self._error(HTTPStatus.BAD_REQUEST, "Invalid JSON request")
-            return False
+            return None
+
+        allowed_keys = {"include_text_snapshots"} if route == "/api/init" else set()
+        if not isinstance(payload, dict) or set(payload) - allowed_keys:
+            self._error(HTTPStatus.BAD_REQUEST, "Invalid request options")
+            return None
+        if "include_text_snapshots" in payload and not isinstance(payload["include_text_snapshots"], bool):
+            self._error(HTTPStatus.BAD_REQUEST, "include_text_snapshots must be true or false")
+            return None
         # The browser never chooses a path. The server scans only its startup-configured root.
-        if payload != {}:
-            self._error(HTTPStatus.BAD_REQUEST, "Request body must be an empty JSON object")
-            return False
-        return True
+        return payload
 
     def do_POST(self) -> None:
         route = urlsplit(self.path).path
         if route not in ("/api/init", "/api/check"):
             self._error(HTTPStatus.NOT_FOUND, "Not found")
             return
-        if not self._validate_post():
+        options = self._validate_post(route)
+        if options is None:
             return
 
         if route == "/api/init":
-            self._init_baseline()
+            self._init_baseline(bool(options.get("include_text_snapshots", False)))
         else:
             self._check_baseline()
 
-    def _init_baseline(self) -> None:
-        files, errors = scan_directory(self.server.scan_root, self.server.baseline_path)
+    def _init_baseline(self, include_text_snapshots: bool) -> None:
+        files, errors = scan_directory(
+            self.server.scan_root,
+            self.server.baseline_path,
+            include_text_snapshots=include_text_snapshots,
+        )
         if errors:
             self._json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": "Scan incomplete", "details": errors})
             return
@@ -155,7 +170,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except (IntegrityError, OSError) as exc:
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
             return
-        self._json(HTTPStatus.OK, {"file_count": len(files), "message": "Baseline created"})
+        snapshot_count = sum("text_snapshot" in record for record in files.values())
+        self._json(
+            HTTPStatus.OK,
+            {
+                "file_count": len(files),
+                "text_snapshot_count": snapshot_count,
+                "text_snapshots_enabled": include_text_snapshots,
+                "message": "Baseline created",
+            },
+        )
 
     def _check_baseline(self) -> None:
         try:
@@ -167,7 +191,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.CONFLICT, "Baseline belongs to a different directory")
             return
 
-        current, errors = scan_directory(self.server.scan_root, self.server.baseline_path)
+        current, errors = scan_directory(
+            self.server.scan_root,
+            self.server.baseline_path,
+            include_text_snapshots=True,
+        )
         if errors:
             self._json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": "Scan incomplete", "details": errors})
             return
@@ -181,6 +209,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if old_files[name]["sha256"] != current[name]["sha256"]
         )
         unchanged = len(current_names & old_names) - len(changed)
+        diffs: dict[str, str] = {}
+        diff_unavailable: list[str] = []
+        for name in added + changed + removed:
+            diff = _snapshot_diff(name, old_files.get(name), current.get(name))
+            if diff is None:
+                diff_unavailable.append(name)
+            else:
+                diffs[name] = diff
         self._json(
             HTTPStatus.OK,
             {
@@ -190,6 +226,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "unchanged_count": unchanged,
                 "total_count": len(current),
                 "has_differences": bool(added or changed or removed),
+                "diffs": diffs,
+                "diff_unavailable": diff_unavailable,
             },
         )
 
